@@ -1,122 +1,182 @@
-import { useState } from 'react'
-import heroImg from './assets/hero.png'
-import reactLogo from './assets/react.svg'
-import viteLogo from './assets/vite.svg'
-import './App.css'
+import React, { useState, useEffect } from 'react';
+import { Sidebar } from './components/Sidebar';
+import { ChatWorkspace } from './components/ChatWorkspace';
+import { FindingsPanel } from './components/FindingsPanel';
+import { ReportModal } from './components/ReportModal';
+import { EvaluationModal } from './components/EvaluationModal';
+import { ScenarioPreset, AnalysisResponse } from './types';
+import { fetchScenarios, analyzeDecision } from './services/api';
 
-function App() {
-  const [count, setCount] = useState(0)
+export function App() {
+  const [scenarios, setScenarios] = useState<ScenarioPreset[]>([]);
+  const [activeScenarioId, setActiveScenarioId] = useState<string | undefined>(undefined);
+  
+  const [decisionText, setDecisionText] = useState('');
+  const [stakes, setStakes] = useState('high');
+  const [deadline, setDeadline] = useState('');
+  const [options, setOptions] = useState<string[]>([]);
+  const [confidenceBefore, setConfidenceBefore] = useState<number>(85);
+  const [confidenceAfter, setConfidenceAfter] = useState<number | undefined>(undefined);
+  
+  const [analysis, setAnalysis] = useState<AnalysisResponse | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const [showReportModal, setShowReportModal] = useState(false);
+  const [showEvaluationModal, setShowEvaluationModal] = useState(false);
+
+  // Load scenarios on mount
+  useEffect(() => {
+    fetchScenarios().then(data => {
+      setScenarios(data);
+      if (data.length > 0) {
+        const official = data.find(s => s.id === 'internship-official') || data[0];
+        setActiveScenarioId(official.id);
+        setDecisionText(official.text);
+        setStakes(official.stakes);
+        setOptions(official.options);
+        setConfidenceBefore(official.confidence_before || 85);
+      }
+    });
+  }, []);
+
+  const handleSelectScenario = async (scenario: ScenarioPreset) => {
+    setActiveScenarioId(scenario.id);
+    setDecisionText(scenario.text);
+    setStakes(scenario.stakes);
+    setOptions(scenario.options);
+    setConfidenceBefore(scenario.confidence_before || 75);
+    setConfidenceAfter(undefined);
+    setError(null);
+    
+    setLoading(true);
+    try {
+      const result = await analyzeDecision(
+        scenario.text,
+        scenario.options,
+        scenario.stakes,
+        undefined,
+        scenario.confidence_before || 75
+      );
+      setAnalysis(result);
+      if (result.confidence_after) {
+        setConfidenceAfter(result.confidence_after);
+      }
+    } catch (err: any) {
+      setError(err.message || 'Analysis error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleNewAnalysis = () => {
+    setActiveScenarioId(undefined);
+    setDecisionText('');
+    setStakes('medium');
+    setDeadline('');
+    setOptions([]);
+    setConfidenceBefore(75);
+    setConfidenceAfter(undefined);
+    setAnalysis(null);
+    setError(null);
+  };
+
+  const handleAnalyze = async () => {
+    if (!decisionText.trim()) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const result = await analyzeDecision(decisionText, options, stakes, deadline, confidenceBefore);
+      setAnalysis(result);
+      setConfidenceAfter(result.confidence_after || Math.max(30, confidenceBefore - 20));
+    } catch (err: any) {
+      setError(err.message || 'Analysis request failed. Please check network/API status.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleUpdateAssumption = (id: string, status: 'confirmed' | 'dismissed' | 'unresolved', note?: string) => {
+    if (!analysis) return;
+    const updatedAssumptions = analysis.assumptions.map(item => {
+      if (item.id === id) {
+        return { ...item, status, user_note: note !== undefined ? note : item.user_note };
+      }
+      return item;
+    });
+    setAnalysis({
+      ...analysis,
+      assumptions: updatedAssumptions
+    });
+  };
 
   return (
-    <>
-      <section id="center">
-        <div className="hero">
-          <img src={heroImg} className="base" width="170" height="179" alt="" />
-          <img src={reactLogo} className="framework" alt="React logo" />
-          <img src={viteLogo} className="vite" alt="Vite logo" />
-        </div>
-        <div>
-          <h1>Get started</h1>
-          <p>
-            Edit <code>src/App.tsx</code> and save to test <code>HMR</code>
-          </p>
-        </div>
-        <button
-          type="button"
-          className="counter"
-          onClick={() => setCount((count) => count + 1)}
-        >
-          Count is {count}
-        </button>
-      </section>
+    <div
+      style={{
+        display: 'flex',
+        height: '100vh',
+        width: '100vw',
+        overflow: 'hidden',
+        backgroundColor: 'var(--void)'
+      }}
+    >
+      {/* 1. Left Sidebar */}
+      <Sidebar
+        scenarios={scenarios}
+        activeScenarioId={activeScenarioId}
+        onSelectScenario={handleSelectScenario}
+        onNewAnalysis={handleNewAnalysis}
+        onOpenEvaluation={() => setShowEvaluationModal(true)}
+      />
 
-      <div className="ticks"></div>
+      {/* 2. Center Stage: Chat Workspace */}
+      <ChatWorkspace
+        decisionText={decisionText}
+        setDecisionText={setDecisionText}
+        stakes={stakes}
+        setStakes={setStakes}
+        deadline={deadline}
+        setDeadline={setDeadline}
+        options={options}
+        setOptions={setOptions}
+        confidenceBefore={confidenceBefore}
+        setConfidenceBefore={setConfidenceBefore}
+        confidenceAfter={confidenceAfter}
+        setConfidenceAfter={setConfidenceAfter}
+        onAnalyze={handleAnalyze}
+        onReset={handleNewAnalysis}
+        analysis={analysis}
+        loading={loading}
+        error={error}
+      />
 
-      <section id="next-steps">
-        <div id="docs">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#documentation-icon"></use>
-          </svg>
-          <h2>Documentation</h2>
-          <p>Your questions, answered</p>
-          <ul>
-            <li>
-              <a href="https://vite.dev/" target="_blank">
-                <img className="logo" src={viteLogo} alt="" />
-                Explore Vite
-              </a>
-            </li>
-            <li>
-              <a href="https://react.dev/" target="_blank">
-                <img className="button-icon" src={reactLogo} alt="" />
-                Learn more
-              </a>
-            </li>
-          </ul>
-        </div>
-        <div id="social">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#social-icon"></use>
-          </svg>
-          <h2>Connect with us</h2>
-          <p>Join the Vite community</p>
-          <ul>
-            <li>
-              <a href="https://github.com/vitejs/vite" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#github-icon"></use>
-                </svg>
-                GitHub
-              </a>
-            </li>
-            <li>
-              <a href="https://chat.vite.dev/" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#discord-icon"></use>
-                </svg>
-                Discord
-              </a>
-            </li>
-            <li>
-              <a href="https://x.com/vite_js" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#x-icon"></use>
-                </svg>
-                X.com
-              </a>
-            </li>
-            <li>
-              <a href="https://bsky.app/profile/vite.dev" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#bluesky-icon"></use>
-                </svg>
-                Bluesky
-              </a>
-            </li>
-          </ul>
-        </div>
-      </section>
+      {/* 3. Right Panel: Live Cognitive Findings */}
+      <FindingsPanel
+        analysis={analysis}
+        decisionText={decisionText}
+        onUpdateAssumption={handleUpdateAssumption}
+        onOpenReport={() => setShowReportModal(true)}
+        loading={loading}
+      />
 
-      <div className="ticks"></div>
-      <section id="spacer"></section>
-    </>
-  )
+      {/* 4. Modals */}
+      {showReportModal && analysis && (
+        <ReportModal
+          analysis={{
+            ...analysis,
+            confidence_before: confidenceBefore,
+            confidence_after: confidenceAfter
+          }}
+          originalText={decisionText}
+          onClose={() => setShowReportModal(false)}
+        />
+      )}
+
+      {showEvaluationModal && (
+        <EvaluationModal onClose={() => setShowEvaluationModal(false)} />
+      )}
+    </div>
+  );
 }
 
-export default App
+export default App;

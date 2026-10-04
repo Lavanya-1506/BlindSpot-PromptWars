@@ -6,6 +6,7 @@ class DecisionInput(BaseModel):
     options: Optional[List[str]] = Field(default_factory=list, description="Explicit options if provided.")
     stakes: Optional[str] = Field("medium", description="Perceived stakes: low, medium, high.")
     deadline: Optional[str] = Field(None, description="Timeline or deadline for the decision.")
+    confidence_before: Optional[int] = Field(75, description="Initial confidence score (0-100%).")
 
 class AssumptionItem(BaseModel):
     id: str
@@ -31,16 +32,32 @@ class SocraticQuestion(BaseModel):
     text: str = Field(..., description="Specific, open-ended, non-leading question applying symmetrically.")
     relates_to: str
 
+class PreMortemFailureMode(BaseModel):
+    id: str
+    scenario: str = Field(..., description="Hypothetical failure mechanism under prospective hindsight.")
+    tied_assumption: str = Field(..., description="The unexamined assumption that enables this failure.")
+    neutral_check: str = Field(..., description="Non-directive inquiry to verify before committing.")
+
+class ValidationStep(BaseModel):
+    id: str
+    title: str
+    action_to_verify: str = Field(..., description="Concrete, neutral action step to test or verify unexamined facts.")
+    target_dimension: str
+
 class AnalysisResponse(BaseModel):
     conversation_id: str
     decision_summary: str
     options_detected: List[str] = Field(default_factory=list)
     needs_clarification: bool = False
     clarifying_question: Optional[str] = None
+    confidence_before: Optional[int] = 75
+    confidence_after: Optional[int] = None
     assumptions: List[AssumptionItem] = Field(default_factory=list)
     overlooked_factors: List[OverlookedFactor] = Field(default_factory=list)
     conflicts: List[ConflictItem] = Field(default_factory=list)
     socratic_questions: List[SocraticQuestion] = Field(default_factory=list)
+    pre_mortem_analysis: List[PreMortemFailureMode] = Field(default_factory=list)
+    validation_plan: List[ValidationStep] = Field(default_factory=list)
     scope_disclaimer: str = "This report contains no recommendation. The decision remains entirely yours."
     guardrail_passed: bool = True
     guardrail_flags: List[str] = Field(default_factory=list)
@@ -65,3 +82,4 @@ class ScenarioPreset(BaseModel):
     stakes: str
     text: str
     options: List[str]
+    confidence_before: Optional[int] = 80

@@ -1,0 +1,80 @@
+{
+  "conversation_id": "benchmark-internship-001",
+  "decision_summary": "You are evaluating whether to accept a 6-month junior developer internship weighing stipend, proximity, and industry experience against existing 3-day weekly college classes.",
+  "options_detected": [
+    "Accept the 6-month junior developer internship",
+    "Continue with current academic schedule without the internship"
+  ],
+  "needs_clarification": false,
+  "confidence_before": 85,
+  "confidence_after": 55,
+  "assumptions": [
+    {
+      "id": "asm-1",
+      "statement": "You seem to assume a full-time 9 to 6 schedule can be sustained alongside college classes three days a week without academic penalty.",
+      "evidence_quote": "9 to 6 hours, I have classes three days a week",
+      "status": "confirmed",
+      "user_note": "Will check lecture attendance rules."
+    },
+    {
+      "id": "asm-2",
+      "statement": "You seem to assume the role of junior developer at this company will provide the specific type of industry experience that advances your career goals.",
+      "evidence_quote": "industry experience",
+      "status": "unresolved",
+      "user_note": "Need to clarify tech stack."
+    }
+  ],
+  "overlooked_factors": [
+    {
+      "category": "academics",
+      "title": "Academic Compatibility & Exam Crunch",
+      "observation": "How the 9-to-6 schedule accommodates university exams, group projects, mandatory lab hours, and class attendance is unaddressed.",
+      "relevance_why": "Academic penalties or failed coursework could delay graduation, altering the net benefit of a 6-month stipend."
+    },
+    {
+      "category": "learning_quality",
+      "title": "Mentorship & Team Engineering Culture",
+      "observation": "The presence of senior engineering mentorship, code review processes, and actual learning scope is not described.",
+      "relevance_why": "A junior title without active guidance can result in repetitive tasks with little transferable skill acquisition."
+    }
+  ],
+  "conflicts": [
+    {
+      "id": "cnf-1",
+      "statement_a": "Mainly considering it for the stipend, the closeness",
+      "statement_b": "industry experience",
+      "tension": "You cite high-value industry experience as a primary motivation, yet the decision factors you emphasize are logistical convenience and immediate cash compensation."
+    }
+  ],
+  "socratic_questions": [
+    {
+      "id": "sq-1",
+      "text": "What would need to be true about the daily engineering work six months from now for you to feel this was the best use of your semester?",
+      "relates_to": "Learning Quality"
+    },
+    {
+      "id": "sq-2",
+      "text": "How would each option shape your weekly schedule during critical exam periods or heavy project deadlines?",
+      "relates_to": "Academic Compatibility"
+    }
+  ],
+  "pre_mortem_analysis": [
+    {
+      "id": "pm-1",
+      "scenario": "Six months in, mandatory class attendance triggers exam disqualification while work deadlines prevent study.",
+      "tied_assumption": "Assumes 9-6 schedule fits alongside classes 3 days a week without schedule clashes.",
+      "neutral_check": "What explicit written agreement exists between your university attendance policy and this employer's daily hours?"
+    }
+  ],
+  "validation_plan": [
+    {
+      "id": "val-1",
+      "title": "Examine Academic Regulations",
+      "action_to_verify": "Check university handbook on mandatory lecture attendance thresholds and exam reschedule policies.",
+      "target_dimension": "Academics"
+    }
+  ],
+  "scope_disclaimer": "This report contains no recommendation. The decision remains entirely yours.",
+  "guardrail_passed": true,
+  "guardrail_flags": []
+}
