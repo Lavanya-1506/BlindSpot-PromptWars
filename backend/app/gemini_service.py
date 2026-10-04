@@ -3,7 +3,20 @@ import json
 import re
 import uuid
 import httpx
+from pathlib import Path
 from typing import Optional, Dict, Any, List
+from dotenv import load_dotenv
+
+# Search and load .env from multiple candidate paths
+for env_candidate in [
+    Path(__file__).resolve().parent.parent / ".env",          # backend/.env
+    Path(__file__).resolve().parent.parent.parent / ".env",   # root .env
+    Path.cwd() / ".env",                                       # cwd .env
+    Path.cwd() / "backend" / ".env"                            # cwd/backend/.env
+]:
+    if env_candidate.exists():
+        load_dotenv(env_candidate, override=True)
+
 from .schemas import (
     DecisionInput,
     AnalysisResponse,
@@ -11,21 +24,54 @@ from .schemas import (
     OverlookedFactor,
     ConflictItem,
     SocraticQuestion,
+    PreMortemFailureMode,
+    ValidationStep,
     FollowupInput
 )
 from .prompts import SYSTEM_PROMPT, FEW_SHOT_EXAMPLE_USER, FEW_SHOT_EXAMPLE_ASSISTANT
 from .guardrails import validate_and_clean_analysis, check_sensitive_content
 from .mock_data import OFFICIAL_INTERNSHIP_BENCHMARK
 
-from dotenv import load_dotenv
-load_dotenv()
+MODELS_TO_TRY = ["gemini-3.8-flash", "gemini-3.8-flash-lite"]
 
-DEFAULT_API_KEY = ""
-MODELS_TO_TRY = ["gemini-3.8-flash", "gemini-2.0-flash", "gemini-1.5-flash"]
+def extract_json_safely(raw_text: str) -> Optional[Dict[str, Any]]:
+    """Robustly extracts JSON from raw model text, stripping markdown or surrounding text."""
+    if not raw_text:
+        return None
+        
+    text = raw_text.strip()
+    
+    # Check for markdown code fences
+    json_match = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", text)
+    if json_match:
+        try:
+            return json.loads(json_match.group(1).strip())
+        except Exception:
+            pass
+
+    # Find the outermost curly braces
+    first_brace = text.find('{')
+    last_brace = text.rfind('}')
+    if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
+        try:
+            return json.loads(text[first_brace:last_brace + 1].strip())
+        except Exception:
+            pass
+
+    try:
+        return json.loads(text)
+    except Exception:
+        return None
 
 class GeminiService:
     def __init__(self):
-        self.api_key = os.getenv("GEMINI_API_KEY", DEFAULT_API_KEY)
+        self.api_key = os.getenv("GEMINI_API_KEY", "")
+
+    def get_api_key(self) -> str:
+        """Returns the current API key, checking environment dynamically."""
+        if not self.api_key:
+            self.api_key = os.getenv("GEMINI_API_KEY", "")
+        return self.api_key
 
     async def analyze_decision(self, input_data: DecisionInput) -> AnalysisResponse:
         # 1. Check for sensitive self-harm / crisis content
@@ -37,6 +83,8 @@ class GeminiService:
                 options_detected=[],
                 needs_clarification=True,
                 clarifying_question=sensitive_msg,
+                confidence_before=input_data.confidence_before,
+                confidence_after=input_data.confidence_before,
                 assumptions=[],
                 overlooked_factors=[],
                 conflicts=[],
@@ -55,6 +103,8 @@ class GeminiService:
                 options_detected=[],
                 needs_clarification=True,
                 clarifying_question="To help surface blind spots: What specific decision are you considering, what are your main reasons, and what are the key constraints or alternatives on your mind?",
+                confidence_before=input_data.confidence_before,
+                confidence_after=input_data.confidence_before,
                 assumptions=[],
                 overlooked_factors=[],
                 conflicts=[],
@@ -64,8 +114,10 @@ class GeminiService:
                 guardrail_flags=["sparse_input_clarification"]
             )
 
-        # 3. Construct prompt payload for Gemini
         conversation_id = str(uuid.uuid4())
+        active_key = self.get_api_key()
+
+        # 3. Construct prompt payload for Gemini
         user_prompt_content = f"""USER DECISION INPUT:
 Text: {input_data.text}
 Explicit Options (if any): {', '.join(input_data.options) if input_data.options else 'Not explicitly specified'}
@@ -100,33 +152,39 @@ Analyze the reasoning above following all SYSTEM PROMPT constraints. Output stri
             }
         }
 
-        # 4. Attempt call through candidate models
+        # 4. Attempt call through candidate models if API key is present
         raw_text: Optional[str] = None
         last_error: Optional[str] = None
 
-        async with httpx.AsyncClient(timeout=25.0) as client:
-            for model_name in MODELS_TO_TRY:
-                url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={self.api_key}"
-                try:
-                    res = await client.post(url, json=payload, headers={"Content-Type": "application/json"})
-                    if res.status_code == 200:
-                        data = res.json()
-                        candidates = data.get("candidates", [])
-                        if candidates:
-                            parts = candidates[0].get("content", {}).get("parts", [])
-                            if parts:
-                                raw_text = parts[0].get("text", "")
-                                break
-                    else:
-                        last_error = f"Model {model_name} HTTP {res.status_code}: {res.text}"
-                except Exception as e:
-                    last_error = f"Model {model_name} exception: {str(e)}"
+        if active_key:
+            async with httpx.AsyncClient(timeout=25.0) as client:
+                for model_name in MODELS_TO_TRY:
+                    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={active_key}"
+                    try:
+                        res = await client.post(url, json=payload, headers={"Content-Type": "application/json"})
+                        if res.status_code == 200:
+                            data = res.json()
+                            candidates = data.get("candidates", [])
+                            if candidates:
+                                parts = candidates[0].get("content", {}).get("parts", [])
+                                if parts:
+                                    raw_text = parts[0].get("text", "")
+                                    break
+                        else:
+                            last_error = f"Model {model_name} HTTP {res.status_code}: {res.text}"
+                    except Exception as e:
+                        last_error = f"Model {model_name} exception: {str(e)}"
+        else:
+            last_error = "No GEMINI_API_KEY found in environment"
 
-        # 5. Fallback if API returned empty or failed
+        # 5. Fallback if API returned empty, failed, or hit rate limits
         if not raw_text:
             print(f"[GeminiService Warning] API call failed: {last_error}. Using grounded benchmark fallback.")
             if "internship" in input_data.text.lower():
-                return OFFICIAL_INTERNSHIP_BENCHMARK
+                benchmark = OFFICIAL_INTERNSHIP_BENCHMARK.model_copy(deep=True)
+                benchmark.conversation_id = conversation_id
+                benchmark.confidence_before = input_data.confidence_before or 85
+                return benchmark
             
             # Grounded analytical fallback for other inputs
             return AnalysisResponse(
@@ -140,7 +198,7 @@ Analyze the reasoning above following all SYSTEM PROMPT constraints. Output stri
                 assumptions=[
                     AssumptionItem(
                         id="asm-1",
-                        statement="You assume the primary factors mentioned in your summary are the only ones critical to the outcome.",
+                        statement="You seem to assume the primary factors mentioned in your summary are the only ones critical to the outcome.",
                         evidence_quote=input_data.text[:min(60, len(input_data.text))],
                         status="unreviewed"
                     )
@@ -193,24 +251,29 @@ Analyze the reasoning above following all SYSTEM PROMPT constraints. Output stri
                 guardrail_flags=["api_rate_limit_fallback_active"]
             )
 
-        # 6. Parse JSON safely
-        try:
-            cleaned_json = raw_text.strip()
-            if cleaned_json.startswith("```json"):
-                cleaned_json = cleaned_json[7:]
-            if cleaned_json.startswith("```"):
-                cleaned_json = cleaned_json[3:]
-            if cleaned_json.endswith("```"):
-                cleaned_json = cleaned_json[:-3]
-            parsed_data = json.loads(cleaned_json.strip())
-
-            # Assign generated conversation ID
-            parsed_data["conversation_id"] = conversation_id
-
-            response = AnalysisResponse.model_validate(parsed_data)
-        except Exception as parse_err:
-            print(f"[GeminiService Error] JSON parsing error: {parse_err}. Raw output was: {raw_text[:200]}")
-            # Try to build a response gracefully
+        # 6. Parse JSON safely using robust extractor
+        parsed_data = extract_json_safely(raw_text)
+        if parsed_data:
+            try:
+                parsed_data["conversation_id"] = conversation_id
+                if "confidence_before" not in parsed_data:
+                    parsed_data["confidence_before"] = input_data.confidence_before or 75
+                response = AnalysisResponse.model_validate(parsed_data)
+            except Exception as parse_err:
+                print(f"[GeminiService Error] Schema validation error: {parse_err}")
+                response = OFFICIAL_INTERNSHIP_BENCHMARK if "internship" in input_data.text.lower() else AnalysisResponse(
+                    conversation_id=conversation_id,
+                    decision_summary="Decision evaluated.",
+                    options_detected=[],
+                    assumptions=[],
+                    overlooked_factors=[],
+                    conflicts=[],
+                    socratic_questions=[],
+                    guardrail_passed=False,
+                    guardrail_flags=["schema_validation_error"]
+                )
+        else:
+            print(f"[GeminiService Error] Failed to extract valid JSON. Raw output: {raw_text[:200]}")
             response = OFFICIAL_INTERNSHIP_BENCHMARK if "internship" in input_data.text.lower() else AnalysisResponse(
                 conversation_id=conversation_id,
                 decision_summary="Decision evaluated.",
@@ -229,6 +292,8 @@ Analyze the reasoning above following all SYSTEM PROMPT constraints. Output stri
 
     async def followup_reflection(self, followup: FollowupInput) -> Dict[str, Any]:
         """Processes user's answer to a Socratic question to update or deepen findings."""
+        active_key = self.get_api_key()
+
         user_prompt = f"""THE ORIGINAL DECISION:
 {followup.decision_text}
 
@@ -259,19 +324,24 @@ Return JSON:
             "generationConfig": {"response_mime_type": "application/json", "temperature": 0.35}
         }
 
-        async with httpx.AsyncClient(timeout=20.0) as client:
-            for model_name in MODELS_TO_TRY:
-                url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={self.api_key}"
-                try:
-                    res = await client.post(url, json=payload, headers={"Content-Type": "application/json"})
-                    if res.status_code == 200:
-                        data = res.json()
-                        parts = data.get("candidates", [])[0].get("content", {}).get("parts", [])
-                        text = parts[0].get("text", "")
-                        clean = re.sub(r"^```json|```$", "", text.strip(), flags=re.MULTILINE)
-                        return json.loads(clean.strip())
-                except Exception:
-                    continue
+        if active_key:
+            async with httpx.AsyncClient(timeout=20.0) as client:
+                for model_name in MODELS_TO_TRY:
+                    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={active_key}"
+                    try:
+                        res = await client.post(url, json=payload, headers={"Content-Type": "application/json"})
+                        if res.status_code == 200:
+                            data = res.json()
+                            candidates = data.get("candidates", [])
+                            if candidates:
+                                parts = candidates[0].get("content", {}).get("parts", [])
+                                if parts:
+                                    text = parts[0].get("text", "")
+                                    parsed = extract_json_safely(text)
+                                    if parsed:
+                                        return parsed
+                    except Exception:
+                        continue
 
         # Fallback reflection
         return {
